@@ -1,3 +1,5 @@
 /.idea
 /processed_data
 /ucf101
+/predictions_storage
+/__pycache__

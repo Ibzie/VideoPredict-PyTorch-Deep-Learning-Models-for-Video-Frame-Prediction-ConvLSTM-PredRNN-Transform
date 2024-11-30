@@ -8,11 +8,42 @@ from PIL import Image
 import matplotlib.pyplot as plt
 from torchvision import transforms
 import logging
+import torch.nn.functional as F
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
+class TemporalAttention(nn.Module):
+    def __init__(self, hidden_channels):
+        super(TemporalAttention, self).__init__()
+        self.query = nn.Conv2d(hidden_channels, hidden_channels, 1)
+        self.key = nn.Conv2d(hidden_channels, hidden_channels, 1)
+        self.value = nn.Conv2d(hidden_channels, hidden_channels, 1)
+        self.gamma = nn.Parameter(torch.zeros(1))
+
+    def forward(self, x):
+        # x shape: [batch_size, sequence_length, channels, height, width]
+        batch_size, seq_len, channels, height, width = x.size()
+
+        # Reshape for attention computation
+        x_flat = x.view(batch_size, seq_len, -1)  # [B, T, C*H*W]
+
+        # Compute query, key, value
+        q = self.query(x.view(-1, channels, height, width)).view(batch_size, seq_len, -1)  # [B, T, C*H*W]
+        k = self.key(x.view(-1, channels, height, width)).view(batch_size, seq_len, -1)  # [B, T, C*H*W]
+        v = self.value(x.view(-1, channels, height, width)).view(batch_size, seq_len, -1)  # [B, T, C*H*W]
+
+        # Compute attention scores
+        attention = torch.bmm(q, k.transpose(1, 2))  # [B, T, T]
+        attention = F.softmax(attention / np.sqrt(channels * height * width), dim=2)
+
+        # Apply attention
+        out = torch.bmm(attention, v)  # [B, T, C*H*W]
+        out = out.view(batch_size, seq_len, channels, height, width)
+
+        return self.gamma * out + x
 
 class VideoFrameDataset(Dataset):
     def __init__(self, root_dir, sequence_length=10, prediction_length=5):
@@ -78,28 +109,30 @@ class VideoFrameDataset(Dataset):
 
 
 class ConvLSTMCell(nn.Module):
-    def __init__(self, input_channels, hidden_channels, kernel_size):
+    def __init__(self, input_channels, hidden_channels, kernel_size, dropout=0.3):
         super(ConvLSTMCell, self).__init__()
 
         self.input_channels = input_channels
         self.hidden_channels = hidden_channels
         self.kernel_size = kernel_size
         self.padding = kernel_size // 2
-
-        total_channels = 4 * self.hidden_channels
+        self.dropout = nn.Dropout2d(dropout)
 
         self.conv = nn.Conv2d(
             in_channels=self.input_channels + self.hidden_channels,
-            out_channels=total_channels,
+            out_channels=4 * self.hidden_channels,
             kernel_size=self.kernel_size,
             padding=self.padding,
             bias=True
         )
 
+        nn.init.xavier_uniform_(self.conv.weight)
+
     def forward(self, input_tensor, cur_state):
         h_cur, c_cur = cur_state
 
         combined = torch.cat([input_tensor, h_cur], dim=1)
+        combined = self.dropout(combined)
         conv_output = self.conv(combined)
 
         cc_i, cc_f, cc_o, cc_g = torch.split(conv_output, self.hidden_channels, dim=1)
@@ -115,54 +148,175 @@ class ConvLSTMCell(nn.Module):
         return h_next, c_next
 
 
-class ConvLSTM(nn.Module):
+# class ConvLSTM(nn.Module):
+#     def __init__(self, input_channels, hidden_channels, kernel_size, num_layers):
+#         super(ConvLSTM, self).__init__()
+#
+#         self.input_channels = input_channels
+#         self.hidden_channels = hidden_channels
+#         self.kernel_size = kernel_size
+#         self.num_layers = num_layers
+#
+#         cell_list = []
+#         for i in range(num_layers):
+#             cur_input_channels = input_channels if i == 0 else hidden_channels
+#             cell_list.append(ConvLSTMCell(cur_input_channels, hidden_channels, kernel_size))
+#         self.cell_list = nn.ModuleList(cell_list)
+#
+#         self.motion_encoder = nn.Sequential(
+#             nn.Conv2d(input_channels, 32, kernel_size=3, padding=1),
+#             nn.BatchNorm2d(32),
+#             nn.ReLU(inplace=True),
+#             nn.Conv2d(32, 64, kernel_size=3, padding=1),
+#             nn.BatchNorm2d(64),
+#             nn.ReLU(inplace=True)
+#         )
+#
+#         self.decoder = nn.Sequential(
+#             nn.Conv2d(hidden_channels + 64, hidden_channels, kernel_size=3, padding=1),
+#             nn.BatchNorm2d(hidden_channels),
+#             nn.ReLU(inplace=True),
+#             ResidualBlock(hidden_channels),
+#             ResidualBlock(hidden_channels),
+#             nn.Conv2d(hidden_channels, input_channels, kernel_size=3, padding=1),
+#             nn.Tanh()
+#         )
+#
+#     def compute_motion_features(self, x):
+#         # Reshape input for motion computation
+#         b, t, c, h, w = x.size()
+#         x_reshaped = x.view(b * t, c, h, w)
+#
+#         # Compute temporal differences
+#         diffs = x_reshaped[1:] - x_reshaped[:-1]
+#         motion_feature = diffs.mean(dim=0, keepdim=True)
+#
+#         return self.motion_encoder(motion_feature)
+#
+#     def forward(self, x):
+#         batch_size, seq_len, _, height, width = x.size()
+#         hidden_state = self._init_hidden(batch_size, height, width)
+#
+#         motion_features = self.compute_motion_features(x)
+#
+#         for layer_idx in range(self.num_layers):
+#             h, c = hidden_state[layer_idx]
+#             output_inner = []
+#
+#             for t in range(seq_len):
+#                 h, c = self.cell_list[layer_idx](x[:, t], [h, c])
+#                 output_inner.append(h)
+#
+#             layer_output = torch.stack(output_inner, dim=1)
+#             x = layer_output
+#
+#         predictions = self.decoder(torch.cat([h, motion_features.expand(batch_size, -1, height, width)], dim=1))
+#         return predictions
+#
+#     def _init_hidden(self, batch_size, height, width):
+#         init_states = []
+#         for i in range(self.num_layers):
+#             init_states.append([
+#                 torch.zeros(batch_size, self.hidden_channels, height, width).to(next(self.parameters()).device),
+#                 torch.zeros(batch_size, self.hidden_channels, height, width).to(next(self.parameters()).device)
+#             ])
+#         return init_states
+
+
+class EnhancedConvLSTM(nn.Module):
     def __init__(self, input_channels, hidden_channels, kernel_size, num_layers):
-        super(ConvLSTM, self).__init__()
+        super(EnhancedConvLSTM, self).__init__()
 
         self.input_channels = input_channels
         self.hidden_channels = hidden_channels
         self.kernel_size = kernel_size
         self.num_layers = num_layers
 
+        # ConvLSTM cells
         cell_list = []
-        for i in range(0, self.num_layers):
-            cur_input_channels = self.input_channels if i == 0 else self.hidden_channels
-            cell_list.append(ConvLSTMCell(cur_input_channels, self.hidden_channels, self.kernel_size))
-
+        for i in range(num_layers):
+            cur_input_channels = input_channels if i == 0 else hidden_channels
+            cell_list.append(ConvLSTMCell(cur_input_channels, hidden_channels, kernel_size))
         self.cell_list = nn.ModuleList(cell_list)
 
-        self.output_conv = nn.Conv2d(
-            in_channels=self.hidden_channels,
-            out_channels=input_channels,
-            kernel_size=3,
-            padding=1
+        # Temporal attention module
+        self.temporal_attention = TemporalAttention(hidden_channels)
+
+        # Motion encoder
+        self.motion_encoder = nn.Sequential(
+            nn.Conv2d(input_channels, 32, kernel_size=3, padding=1),
+            nn.BatchNorm2d(32),
+            nn.ReLU(inplace=True),
+            ResidualBlock(32),
+            nn.Conv2d(32, 64, kernel_size=3, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True),
+            ResidualBlock(64)
         )
 
-    def forward(self, x):
-        # x shape: [batch_size, sequence_length, channels, height, width]
-        batch_size, seq_len, _, height, width = x.size()
+        # Decoder - Fixed dimensions
+        decoder_in_channels = hidden_channels + 64  # Last hidden state + motion features
+        self.decoder = nn.Sequential(
+            nn.Conv2d(decoder_in_channels, hidden_channels, kernel_size=3, padding=1),
+            nn.BatchNorm2d(hidden_channels),
+            nn.ReLU(inplace=True),
+            ResidualBlock(hidden_channels),
+            nn.Conv2d(hidden_channels, hidden_channels, kernel_size=3, padding=1),
+            nn.BatchNorm2d(hidden_channels),
+            nn.ReLU(inplace=True),
+            ResidualBlock(hidden_channels),
+            nn.Conv2d(hidden_channels, input_channels, kernel_size=3, padding=1),
+            nn.Tanh()
+        )
 
+    def compute_motion_features(self, x):
+        # x shape: [batch_size, seq_len, channels, height, width]
+        b, t, c, h, w = x.size()
+        x_reshaped = x.view(b * t, c, h, w)
+
+        # Compute temporal differences
+        diffs = x_reshaped[1:] - x_reshaped[:-1]
+        motion_feature = diffs.mean(dim=0, keepdim=True)
+
+        return self.motion_encoder(motion_feature)
+
+    def forward(self, x):
+        print(f"Input shape: {x.shape}")  # Debug print
+        batch_size, seq_len, channels, height, width = x.size()
         hidden_state = self._init_hidden(batch_size, height, width)
 
-        layer_output_list = []
-        last_state_list = []
+        # Compute motion features
+        motion_features = self.compute_motion_features(x)
+        print(f"Motion features shape: {motion_features.shape}")  # Debug print
 
+        # Process sequence with ConvLSTM cells
+        layer_output = None
         for layer_idx in range(self.num_layers):
             h, c = hidden_state[layer_idx]
             output_inner = []
 
             for t in range(seq_len):
-                h, c = self.cell_list[layer_idx](x[:, t], [h, c])
+                h, c = self.cell_list[layer_idx](x[:, t] if layer_idx == 0 else layer_output[:, t], [h, c])
                 output_inner.append(h)
 
             layer_output = torch.stack(output_inner, dim=1)
-            x = layer_output
+            print(f"Layer {layer_idx} output shape: {layer_output.shape}")  # Debug print
 
-            layer_output_list.append(layer_output)
-            last_state_list.append([h, c])
+        # Apply temporal attention
+        attended_features = self.temporal_attention(layer_output)
+        print(f"Attended features shape: {attended_features.shape}")  # Debug print
 
-        # Generate prediction using the last hidden state
-        predictions = self.output_conv(h)
+        # Take last timestep
+        h = attended_features[:, -1]
+        print(f"Last hidden state shape: {h.shape}")  # Debug print
+
+        # Concatenate with motion features
+        decoder_input = torch.cat([h, motion_features.expand(batch_size, -1, height, width)], dim=1)
+        print(f"Decoder input shape: {decoder_input.shape}")  # Debug print
+
+        # Final prediction
+        predictions = self.decoder(decoder_input)
+        print(f"Predictions shape: {predictions.shape}")  # Debug print
 
         return predictions
 
@@ -176,26 +330,45 @@ class ConvLSTM(nn.Module):
         return init_states
 
 
+class ResidualBlock(nn.Module):
+    def __init__(self, channels):
+        super(ResidualBlock, self).__init__()
+        self.conv1 = nn.Conv2d(channels, channels, kernel_size=3, padding=1)
+        self.bn1 = nn.BatchNorm2d(channels)
+        self.conv2 = nn.Conv2d(channels, channels, kernel_size=3, padding=1)
+        self.bn2 = nn.BatchNorm2d(channels)
+
+    def forward(self, x):
+        residual = x
+        out = F.relu(self.bn1(self.conv1(x)))
+        out = self.bn2(self.conv2(out))
+        out += residual
+        return F.relu(out)
+
+
 def train_model(model, train_loader, val_loader, num_epochs, device):
     criterion = nn.MSELoss()
-    optimizer = optim.Adam(model.parameters(), lr=0.001)
+    optimizer = optim.AdamW(model.parameters(), lr=0.001, weight_decay=0.01)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3)
 
     best_val_loss = float('inf')
+    early_stopping_counter = 0
+    early_stopping_patience = 10
 
     for epoch in range(num_epochs):
         model.train()
         train_loss = 0
 
         for batch_idx, (input_seq, target_seq) in enumerate(train_loader):
-            # Reshape input: [batch, seq_len, channel, height, width]
-            input_seq = input_seq.permute(0, 1, 2, 3, 4).to(device)
-            target_seq = target_seq[:, 0].to(device)  # Take first target frame
+            input_seq = input_seq.to(device)
+            target = target_seq[:, 0].to(device)  # First frame of target sequence
 
             optimizer.zero_grad()
             predictions = model(input_seq)
-            loss = criterion(predictions, target_seq)
+            loss = criterion(predictions, target)
 
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
 
             train_loss += loss.item()
@@ -203,29 +376,36 @@ def train_model(model, train_loader, val_loader, num_epochs, device):
             if batch_idx % 10 == 0:
                 logger.info(f'Epoch: {epoch}, Batch: {batch_idx}, Loss: {loss.item():.6f}')
 
-        # Validation
-        model.eval()
-        val_loss = 0
-        with torch.no_grad():
-            for input_seq, target_seq in val_loader:
-                input_seq = input_seq.permute(0, 1, 2, 3, 4).to(device)
-                target_seq = target_seq[:, 0].to(device)
+        val_loss = validate_model(model, val_loader, criterion, device)
+        scheduler.step(val_loss)
 
-                predictions = model(input_seq)
-                loss = criterion(predictions, target_seq)
-                val_loss += loss.item()
-
-        val_loss /= len(val_loader)
-        logger.info(f'Epoch: {epoch}, Validation Loss: {val_loss:.6f}')
+        logger.info(f'Epoch {epoch}: Train Loss: {train_loss / len(train_loader):.6f}, Val Loss: {val_loss:.6f}')
+        logger.info(f'Learning Rate: {optimizer.param_groups[0]["lr"]:.6f}')
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             torch.save(model.state_dict(), 'best_convlstm_model.pth')
-            logger.info(f'Saved best model with validation loss: {val_loss:.6f}')
+            early_stopping_counter = 0
+        else:
+            early_stopping_counter += 1
+
+        if early_stopping_counter >= early_stopping_patience:
+            break
+
+
+def validate_model(model, val_loader, criterion, device):
+    model.eval()
+    val_loss = 0
+    with torch.no_grad():
+        for input_seq, target_seq in val_loader:
+            input_seq = input_seq.to(device)
+            target = target_seq[:, 0].to(device)
+            predictions = model(input_seq)
+            val_loss += criterion(predictions, target).item()
+    return val_loss / len(val_loader)
 
 
 def main():
-    # Hyperparameters
     batch_size = 8
     sequence_length = 10
     prediction_length = 5
@@ -237,29 +417,31 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     logger.info(f"Using device: {device}")
 
-    # Create datasets
     train_dataset = VideoFrameDataset('processed_data/train',
-                                      sequence_length=sequence_length,
-                                      prediction_length=prediction_length)
-    val_dataset = VideoFrameDataset('processed_data/test',
                                     sequence_length=sequence_length,
                                     prediction_length=prediction_length)
+    val_dataset = VideoFrameDataset('processed_data/test',
+                                  sequence_length=sequence_length,
+                                  prediction_length=prediction_length)
 
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
-    # Initialize model
-    model = ConvLSTM(
-        input_channels=1,  # Grayscale images
-        hidden_channels=hidden_channels,
-        kernel_size=kernel_size,
-        num_layers=num_layers
+    # model = ConvLSTM(
+    #     input_channels=1,
+    #     hidden_channels=hidden_channels,
+    #     kernel_size=kernel_size,
+    #     num_layers=num_layers
+    # ).to(device)
+
+    model = EnhancedConvLSTM(
+        input_channels=1,  # For grayscale images
+        hidden_channels=64,  # Hidden state size
+        kernel_size=3,  # Convolution kernel size
+        num_layers=2  # Number of ConvLSTM layers
     ).to(device)
 
-    logger.info("Starting training...")
     train_model(model, train_loader, val_loader, num_epochs, device)
-
-    logger.info("Training completed!")
 
 
 if __name__ == "__main__":

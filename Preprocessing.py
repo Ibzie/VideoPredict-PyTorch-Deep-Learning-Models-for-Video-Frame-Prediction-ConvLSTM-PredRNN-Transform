@@ -24,42 +24,76 @@ def create_output_dir(base_output_path):
             print(f"Created directory: {path}")
 
 
-def process_video(video_path, output_path, video_name):
-    """Process a single video."""
+# def process_video(video_path, output_path, video_name):
+#     """Process a single video."""
+#     cap = cv2.VideoCapture(video_path)
+#     if not cap.isOpened():
+#         print(f"Error: Could not open video {video_path}")
+#         return 0
+#
+#     frame_count = 0
+#
+#     while True:
+#         ret, frame = cap.read()
+#         if not ret:
+#             break
+#
+#         try:
+#             # Resize frame
+#             frame = cv2.resize(frame, FRAME_SIZE)
+#
+#             # Convert to grayscale if specified
+#             if USE_GRAYSCALE:
+#                 frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+#
+#             # Save individual frame as JPEG
+#             frame_filename = f"{video_name}_frame_{frame_count:03d}.jpg"
+#             frame_path = os.path.join(output_path, frame_filename)
+#             cv2.imwrite(frame_path, frame, [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
+#
+#             frame_count += 1
+#
+#         except Exception as e:
+#             print(f"Error processing frame {frame_count} from video {video_path}: {str(e)}")
+#             continue
+#
+#     cap.release()
+#     return frame_count
+
+def process_video(video_path, output_path, video_name, frame_gap=7):
+    """Process a single video with frame gaps."""
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         print(f"Error: Could not open video {video_path}")
         return 0
 
+    frames = []
     frame_count = 0
+    save_count = 0
 
     while True:
         ret, frame = cap.read()
         if not ret:
             break
 
-        try:
-            # Resize frame
-            frame = cv2.resize(frame, FRAME_SIZE)
+        if frame_count % frame_gap == 0:
+            try:
+                frame = cv2.resize(frame, FRAME_SIZE)
+                if USE_GRAYSCALE:
+                    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-            # Convert to grayscale if specified
-            if USE_GRAYSCALE:
-                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                frame_filename = f"{video_name}_frame_{save_count:03d}.jpg"
+                frame_path = os.path.join(output_path, frame_filename)
+                cv2.imwrite(frame_path, frame, [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
+                save_count += 1
 
-            # Save individual frame as JPEG
-            frame_filename = f"{video_name}_frame_{frame_count:03d}.jpg"
-            frame_path = os.path.join(output_path, frame_filename)
-            cv2.imwrite(frame_path, frame, [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
+            except Exception as e:
+                print(f"Error processing frame {frame_count} from video {video_path}: {str(e)}")
 
-            frame_count += 1
-
-        except Exception as e:
-            print(f"Error processing frame {frame_count} from video {video_path}: {str(e)}")
-            continue
+        frame_count += 1
 
     cap.release()
-    return frame_count
-
+    return save_count
 
 def process_dataset_split(split_path, output_base_path, split_name):
     """Process all videos in a dataset split (train or test)."""
