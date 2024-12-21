@@ -164,24 +164,6 @@ If you encounter:
 - **OpenCV import errors**: Install system dependencies mentioned above
 - **CUDA not found**: Verify CUDA installation and PyTorch CUDA support
 
-## Citation
-
-If you use this project, please cite:
-
-```bibtex
-@article{wang2017predrnn,
-  title={PredRNN: Recurrent Neural Networks for Predictive Learning using Spatiotemporal LSTMs},
-  author={Wang, Yunbo and Long, Mingsheng and Wang, Jianmin and Gao, Zhifeng and Yu, Philip S},
-  journal={Advances in Neural Information Processing Systems},
-  volume={30},
-  pages={879--888},
-  year={2017}
-}
-```
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
 
 ## Acknowledgments
 
