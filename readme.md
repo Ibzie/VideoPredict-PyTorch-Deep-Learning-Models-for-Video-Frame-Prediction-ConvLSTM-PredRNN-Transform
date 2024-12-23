@@ -1,172 +1,163 @@
 # Deep Learning Video Frame Prediction
 
-This project implements three different deep learning models for video frame prediction using the UCF101 dataset. The models are capable of generating future frames based on a sequence of input frames, effectively predicting how an action will continue.
-
-## Models Implemented
-
-1. **Enhanced ConvLSTM**: A Convolutional LSTM model with temporal attention mechanism
-2. **PredRNN**: Implementation of PredRNN with spatiotemporal memory
-3. **Recurrent Memory Transformer**: A transformer-based approach for video prediction
-
-## Dataset
-
-The project uses the UCF101 Action Recognition Dataset, focusing on five specific action categories:
-- YoYo
-- Typing
-- Punch
-- PizzaTossing
-- GolfSwing
-
-Download the dataset from: [UCF101 Dataset](https://www.crcv.ucf.edu/data/UCF101.php)
+This project implements deep learning models for video frame prediction using different architectures including ConvLSTM, PredRNN, and Transformer-based approaches. The models are trained on the UCF101 dataset and can predict future video frames based on a sequence of input frames.
 
 ## Project Structure
 
 ```
-Deep-Learning-Project/
-├── data/
-│   ├── ucf101/                  # Raw dataset
-│   └── processed_data/          # Preprocessed frames
-├── models/
-│   ├── convlstm.py             # Enhanced ConvLSTM implementation
-│   ├── predrnn.py              # PredRNN implementation
-│   └── transformer.py          # Recurrent Memory Transformer
-├── utils/
-│   ├── preprocessing.py        # Data preprocessing utilities
-│   └── evaluation.py           # Evaluation metrics
-├── config/
-│   └── config.yaml             # Configuration parameters
-├── requirements.txt            # Project dependencies
-└── notebooks/                  # Jupyter notebooks for analysis
+DEEP-LEARNING/
+├── checkpoints/              # Model checkpoints directory
+├── ucf101/                   # UCF101 dataset
+│       ├── train/            # Training videos
+│       │   ├── GolfSwing/
+│       │   ├── PizzaTossing/
+│       │   ├── Punch/
+│       │   ├── Typing/
+│       │   └── YoYo/
+│       └── test/           # Testing videos
+│           ├── GolfSwing/
+│           ├── PizzaTossing/
+│           ├── Punch/
+│           ├── Typing/
+│           └── YoYo/
+├── app.py                   # Streamlit web application
+├── ConvLSTM.py             # ConvLSTM model implementation
+├── PredRNN.py              # PredRNN model implementation
+├── Preprocessing.py        # Data preprocessing script
+├── requirements.txt        # Project dependencies
+├── Transformer.py          # Transformer model implementation
+└── readme.md              # Project documentation
 ```
-
-## Setup and Installation
-
-1. Create a virtual environment:
-```bash
-python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-```
-
-2. Install requirements:
-```bash
-pip install -r requirements.txt
-```
-
-3. Download and extract the UCF101 dataset to the `data/ucf101` directory
-
-4. Preprocess the data:
-```bash
-python utils/preprocessing.py
-```
-
-## Model Training
-
-Each model can be trained separately using their respective training scripts:
-
-```bash
-python train.py --model convlstm  # For Enhanced ConvLSTM
-python train.py --model predrnn   # For PredRNN
-python train.py --model transformer  # For Recurrent Memory Transformer
-```
-
-## Performance
-
-Model performance metrics on different action sequences:
-
-### Typing Action Sequence
-| Model | MSE | SSIM |
-|-------|-----|------|
-| Enhanced ConvLSTM | 0.099558 | 0.296273 |
-| PredRNN | 0.019115 | 0.785814 |
-| Recurrent Memory Transformer | 0.034680 | 0.354711 |
-
-### YoYo Action Sequence
-| Model | MSE | SSIM |
-|-------|-----|------|
-| Enhanced ConvLSTM | 0.020076 | 0.372000 |
-| PredRNN | 0.040034 | 0.758295 |
-| Recurrent Memory Transformer | 0.022363 | 0.456513 |
-
-## Implementation Features
-
-- Gradient accumulation for efficient training
-- Mixed precision training using torch.cuda.amp
-- Custom temporal consistency loss function
-- Lazy loading dataset implementation
-- Memory-efficient backpropagation
-- Dynamic batch size adjustment
-- Cyclical learning rates
 
 ## Requirements
 
-- Python 3.8+
-- PyTorch 1.9+
-- CUDA capable GPU (recommended)
-- Other dependencies listed in requirements.txt
+Install the required packages using:
 
-## Linux Platform Specific Instructions
-
-### System Requirements
-- OpenCV dependencies: `sudo apt-get install libgl1-mesa-glx`
-- FFmpeg for video processing: `sudo apt-get install ffmpeg`
-
-### Installation Steps
 ```bash
-# Create virtual environment
-python3 -m venv venv
-source venv/bin/activate
-
-# Install requirements
 pip install -r requirements.txt
+```
 
-# Run the application
+Required packages:
+- torch>=1.9.0
+- torchvision>=0.10.0
+- numpy>=1.19.2
+- opencv-python>=4.5.3
+- scikit-image>=0.18.3
+- matplotlib>=3.4.3
+- streamlit>=1.0.0
+- tqdm>=4.62.3
+- Pillow>=8.3.2
+- pytest>=6.2.5
+- black>=21.9b0
+- flake8>=3.9.2
+- isort>=5.9.3
+
+## Setup and Usage
+
+### 1. Data Preparation
+
+1. Download the UCF101 dataset and organize it in the following structure:
+```
+data/ucf101/
+├── train/
+│   ├── GolfSwing/
+│   ├── PizzaTossing/
+│   ├── Punch/
+│   ├── Typing/
+│   └── YoYo/
+└── test/
+    ├── GolfSwing/
+    ├── PizzaTossing/
+    ├── Punch/
+    ├── Typing/
+    └── YoYo/
+```
+
+2. Run the preprocessing script:
+```bash
+python Preprocessing.py --input-dir ucf101 --output-dir processed_data
+```
+
+Note: The preprocessing script is configured for Windows environments. For Linux users, file path separators and video reading mechanisms may need to be adjusted.
+
+### 2. Training Models
+
+Train each model separately using their respective Python files:
+
+1. ConvLSTM Model:
+```bash
+python ConvLSTM.py
+```
+
+2. PredRNN Model:
+```bash
+python PredRNN.py
+```
+
+3. Transformer Model:
+```bash
+python Transformer.py
+```
+
+Each training script will:
+- Load the preprocessed data
+- Train the model
+- Save the model checkpoints to the `checkpoints` directory
+
+### 3. Running the Web Application
+
+Launch the Streamlit web interface:
+```bash
 streamlit run app.py
 ```
 
-### Known Issues and Solutions
+The web application will:
+1. Allow you to select a model (ConvLSTM, PredRNN, or Transformer)
+2. Upload a video or choose from sample videos
+3. Generate and display frame predictions
 
-1. **Video Codec Support**
-   - The application tries multiple codecs (mp4v, avc1, XVID, MJPG) in order of preference
-   - If you encounter video saving issues, install additional codecs:
-     ```bash
-     sudo apt-get install ubuntu-restricted-extras
-     ```
+## Model Descriptions
 
-2. **OpenCV Headless Mode**
-   - For servers without GUI, use opencv-python-headless:
-     ```bash
-     pip uninstall opencv-python
-     pip install opencv-python-headless
-     ```
+### ConvLSTM
+- Convolutional LSTM architecture
+- Combines spatial and temporal feature learning
+- Suitable for capturing short-term motion patterns
 
-3. **File Permissions**
-   - Ensure write permissions in the execution directory:
-     ```bash
-     chmod -R 755 ./
-     ```
-   - For storage directory:
-     ```bash
-     chmod -R 777 predictions_storage/
-     ```
+### PredRNN
+- Advanced spatiotemporal memory flow
+- Multiple LSTM layers with skip connections
+- Effective for long-term dependencies
 
-4. **CUDA Support**
-   - Verify CUDA installation:
-     ```python
-     python -c "import torch; print(torch.cuda.is_available())"
-     ```
-   - Install CUDA toolkit if needed: [CUDA Toolkit](https://developer.nvidia.com/cuda-downloads)
+### Transformer
+- Self-attention mechanism for temporal modeling
+- Position encoding for frame sequence information
+- Memory-efficient implementation
 
-### Troubleshooting
+## Troubleshooting
 
-If you encounter:
-- **Video writer initialization failed**: Try installing additional codecs or use the MJPG fallback
-- **Permission denied errors**: Check directory permissions and ownership
-- **OpenCV import errors**: Install system dependencies mentioned above
-- **CUDA not found**: Verify CUDA installation and PyTorch CUDA support
+1. Video Loading Issues:
+   - Ensure videos are in .avi or .mp4 format
+   - Check file permissions
+   - Verify OpenCV installation
 
+2. CUDA/GPU Issues:
+   - Verify PyTorch is installed with CUDA support
+   - Check GPU memory usage
+   - Adjust batch size if needed
 
-## Acknowledgments
+3. Preprocessing Errors:
+   - Ensure correct file paths
+   - Verify disk space availability
+   - Check input video format compatibility
 
-- UCF101 dataset creators
-- Implementation inspired by various research papers in video prediction
-- Contributors and maintainers of PyTorch and related libraries
+## License
+
+This project is open-source and available under the MIT License.
+
+## Contributing
+
+1. Fork the repository
+2. Create your feature branch
+3. Commit your changes
+4. Push to the branch
+5. Create a Pull Request

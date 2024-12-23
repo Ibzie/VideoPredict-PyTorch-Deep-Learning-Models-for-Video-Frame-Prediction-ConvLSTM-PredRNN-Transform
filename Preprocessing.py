@@ -1,213 +1,164 @@
+import argparse
 import cv2
 import numpy as np
+from pathlib import Path
 import os
 from tqdm import tqdm
-import matplotlib.pyplot as plt
-from pathlib import Path
+import logging
 
-CATEGORIES = ['YoYo','Typing','Punch','PizzaTossing','GolfSwing']
+# Constants
+CATEGORIES = ['YoYo', 'Typing', 'Punch', 'PizzaTossing', 'GolfSwing']
 FRAME_SIZE = (64, 64)
-USE_GRAYSCALE = True
-BASE_PATH = 'ucf101'
-TRAIN_PATH = os.path.join(BASE_PATH, 'train')
-TEST_PATH = os.path.join(BASE_PATH, 'test')
-OUTPUT_PATH = 'processed_data'
-JPEG_QUALITY = 95
 
+logger = logging.getLogger(__name__)
 
-def create_output_dir(base_output_path):
-    """Create necessary directories for saving processed frames."""
-    for split in ['train', 'test']:
-        for category in CATEGORIES:
-            path = os.path.join(base_output_path, split, category)
-            os.makedirs(path, exist_ok=True)
-            print(f"Created directory: {path}")
+class VideoPreprocessor:
+    """Handle video preprocessing tasks."""
+    
+    def __init__(self, frame_size=FRAME_SIZE, use_grayscale=True, jpeg_quality=95):
+        self.frame_size = frame_size
+        self.use_grayscale = use_grayscale
+        self.jpeg_quality = jpeg_quality
 
+    def verify_data_structure(self, base_path):
+        """Verify UCF101 data structure exists correctly."""
+        base_path = Path(base_path)
+        
+        for split in ['train', 'test']:
+            split_path = base_path / split
+            if not split_path.exists():
+                logger.error(f"Missing {split} directory at {split_path}")
+                return False
+                
+            for category in CATEGORIES:
+                category_path = split_path / category
+                if not category_path.exists():
+                    logger.error(f"Missing category directory: {category_path}")
+                    return False
+                
+                videos = list(category_path.glob('*.avi')) + list(category_path.glob('*.mp4'))
+                if not videos:
+                    logger.error(f"No videos found in {category_path}")
+                    return False
+                
+        return True
 
-# def process_video(video_path, output_path, video_name):
-#     """Process a single video."""
-#     cap = cv2.VideoCapture(video_path)
-#     if not cap.isOpened():
-#         print(f"Error: Could not open video {video_path}")
-#         return 0
-#
-#     frame_count = 0
-#
-#     while True:
-#         ret, frame = cap.read()
-#         if not ret:
-#             break
-#
-#         try:
-#             # Resize frame
-#             frame = cv2.resize(frame, FRAME_SIZE)
-#
-#             # Convert to grayscale if specified
-#             if USE_GRAYSCALE:
-#                 frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-#
-#             # Save individual frame as JPEG
-#             frame_filename = f"{video_name}_frame_{frame_count:03d}.jpg"
-#             frame_path = os.path.join(output_path, frame_filename)
-#             cv2.imwrite(frame_path, frame, [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
-#
-#             frame_count += 1
-#
-#         except Exception as e:
-#             print(f"Error processing frame {frame_count} from video {video_path}: {str(e)}")
-#             continue
-#
-#     cap.release()
-#     return frame_count
+    def process_video(self, video_path, output_dir, video_name, frame_gap=7):
+        """Process a single video file."""
+        cap = cv2.VideoCapture(str(video_path))
+        if not cap.isOpened():
+            logger.error(f"Could not open video {video_path}")
+            return 0
 
-def process_video(video_path, output_path, video_name, frame_gap=7):
-    """Process a single video with frame gaps."""
-    cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        print(f"Error: Could not open video {video_path}")
-        return 0
+        frame_count = 0
+        save_count = 0
 
-    frames = []
-    frame_count = 0
-    save_count = 0
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
 
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
-
-        if frame_count % frame_gap == 0:
-            try:
-                frame = cv2.resize(frame, FRAME_SIZE)
-                if USE_GRAYSCALE:
-                    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-
-                frame_filename = f"{video_name}_frame_{save_count:03d}.jpg"
-                frame_path = os.path.join(output_path, frame_filename)
-                cv2.imwrite(frame_path, frame, [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
-                save_count += 1
-
-            except Exception as e:
-                print(f"Error processing frame {frame_count} from video {video_path}: {str(e)}")
-
-        frame_count += 1
-
-    cap.release()
-    return save_count
-
-def process_dataset_split(split_path, output_base_path, split_name):
-    """Process all videos in a dataset split (train or test)."""
-    total_videos = 0
-    total_frames = 0
-
-    # Print all categories being processed
-    print(f"\nProcessing categories: {', '.join(CATEGORIES)}")
-
-    for category in CATEGORIES:
-        category_path = os.path.join(split_path, category)
-        output_path = os.path.join(output_base_path, split_name, category)
-
-        if not os.path.exists(category_path):
-            print(f"Warning: Category path {category_path} not found")
-            continue
-
-        videos = [f for f in os.listdir(category_path) if f.endswith(('.avi', '.mp4'))]
-
-        if not videos:
-            print(f"Warning: No videos found in {category_path}")
-            continue
-
-        print(f"\nProcessing {len(videos)} videos for {category} in {split_name} split")
-
-        category_videos = 0
-        category_frames = 0
-
-        for video in tqdm(videos, desc=f"Processing {category}"):
-            video_path = os.path.join(category_path, video)
-            video_name = os.path.split(video)[1].split('.')[0]
-            frames = process_video(video_path, output_path, video_name)
-
-            if frames > 0:
-                category_videos += 1
-                category_frames += frames
-
-        total_videos += category_videos
-        total_frames += category_frames
-
-        print(f"Completed {category}: {category_videos} videos, {category_frames} frames")
-
-    return total_videos, total_frames
-
-
-def verify_data(output_path):
-    """Verify processed data and display sample frames."""
-    print("\nVerifying processed data:")
-
-    for split in ['train', 'test']:
-        print(f"\n{split.upper()} Split:")
-        split_path = os.path.join(output_path, split)
-
-        for category in CATEGORIES:
-            category_path = os.path.join(split_path, category)
-            if not os.path.exists(category_path):
-                print(f"Warning: Category path {category_path} not found")
-                continue
-
-            frames = [f for f in os.listdir(category_path) if f.endswith('.jpg')]
-            print(f"{category}: {len(frames)} frames")
-
-            if frames:
+            if frame_count % frame_gap == 0:
                 try:
-                    sample_frame = cv2.imread(os.path.join(category_path, frames[0]))
-                    if sample_frame is None:
-                        print(f"Warning: Could not read sample frame for {category}")
-                        continue
+                    frame = cv2.resize(frame, self.frame_size)
+                    if self.use_grayscale:
+                        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-                    plt.figure(figsize=(5, 5))
-                    if USE_GRAYSCALE:
-                        plt.imshow(sample_frame, cmap='gray')
-                    else:
-                        sample_frame = cv2.cvtColor(sample_frame, cv2.COLOR_BGR2RGB)
-                        plt.imshow(sample_frame)
-                    plt.title(f"{category} - Sample Frame")
-                    plt.axis('off')
-                    plt.show()
-                    plt.close()
+                    frame_filename = f"{video_name}_frame_{save_count:03d}.jpg"
+                    frame_path = output_dir / frame_filename
+                    cv2.imwrite(str(frame_path), frame, [cv2.IMWRITE_JPEG_QUALITY, self.jpeg_quality])
+                    save_count += 1
 
                 except Exception as e:
-                    print(f"Error displaying sample frame for {category}: {str(e)}")
+                    logger.error(f"Error processing frame {frame_count} from {video_path}: {str(e)}")
 
+            frame_count += 1
+
+        cap.release()
+        return save_count
+
+    def process_dataset(self, input_base_path, output_base_path):
+        """Process the entire UCF101 dataset maintaining category structure."""
+        input_base_path = Path(input_base_path)
+        output_base_path = Path(output_base_path)
+
+        if not self.verify_data_structure(input_base_path):
+            raise ValueError("Invalid data directory structure")
+
+        for split in ['train', 'test']:
+            for category in CATEGORIES:
+                output_dir = output_base_path / split / category
+                output_dir.mkdir(parents=True, exist_ok=True)
+
+        total_stats = {'videos': 0, 'frames': 0}
+
+        for split in ['train', 'test']:
+            logger.info(f"\nProcessing {split} split...")
+            split_stats = {'videos': 0, 'frames': 0}
+            
+            for category in CATEGORIES:
+                input_dir = input_base_path / split / category
+                output_dir = output_base_path / split / category
+                
+                videos = list(input_dir.glob('*.avi')) + list(input_dir.glob('*.mp4'))
+                logger.info(f"\nProcessing {len(videos)} videos for {category}")
+                
+                for video_path in tqdm(videos, desc=f"{split}/{category}"):
+                    n_frames = self.process_video(
+                        video_path,
+                        output_dir,
+                        video_path.stem
+                    )
+                    
+                    if n_frames > 0:
+                        split_stats['videos'] += 1
+                        split_stats['frames'] += n_frames
+
+            logger.info(f"\n{split.capitalize()} Split Stats:")
+            logger.info(f"Processed {split_stats['videos']} videos")
+            logger.info(f"Generated {split_stats['frames']} frames")
+            
+            total_stats['videos'] += split_stats['videos']
+            total_stats['frames'] += split_stats['frames']
+
+        return total_stats
 
 def main():
-    # Verify categories are set
-    if not CATEGORIES:
-        raise ValueError("Please specify the categories in the configuration section")
+    parser = argparse.ArgumentParser(description='Preprocess UCF101 video dataset')
+    parser.add_argument('--input-dir', type=str, default='ucf101',
+                      help='Input directory containing UCF101 dataset')
+    parser.add_argument('--output-dir', type=str, default='processed_data',
+                      help='Output directory for processed frames')
+    parser.add_argument('--grayscale', action='store_true',
+                      help='Convert frames to grayscale')
+    args = parser.parse_args()
 
-    # Print configuration
-    print("Starting video preprocessing with configuration:")
-    print(f"Categories: {CATEGORIES}")
-    print(f"Frame size: {FRAME_SIZE}")
-    print(f"Grayscale: {USE_GRAYSCALE}")
-    print(f"Base path: {BASE_PATH}")
+    # Setup logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s'
+    )
 
-    # Create output directories
-    create_output_dir(OUTPUT_PATH)
+    logger.info("Starting video preprocessing...")
+    logger.info(f"Input path: {args.input_dir}")
+    logger.info(f"Output path: {args.output_dir}")
+    logger.info(f"Categories: {CATEGORIES}")
+    logger.info(f"Frame size: {FRAME_SIZE}")
+    logger.info(f"Grayscale: {args.grayscale}")
 
-    # Process training data
-    print("\nProcessing training data...")
-    train_videos, train_frames = process_dataset_split(TRAIN_PATH, OUTPUT_PATH, 'train')
+    preprocessor = VideoPreprocessor(
+        frame_size=FRAME_SIZE,
+        use_grayscale=args.grayscale
+    )
 
-    # Process test data
-    print("\nProcessing test data...")
-    test_videos, test_frames = process_dataset_split(TEST_PATH, OUTPUT_PATH, 'test')
-
-    # Print summary
-    print(f"\nProcessing complete!")
-    print(f"Training: {train_videos} videos, {train_frames} frames")
-    print(f"Test: {test_videos} videos, {test_frames} frames")
-
-    verify_data(OUTPUT_PATH)
-
+    try:
+        stats = preprocessor.process_dataset(args.input_dir, args.output_dir)
+        logger.info("\nPreprocessing Complete!")
+        logger.info(f"Total videos processed: {stats['videos']}")
+        logger.info(f"Total frames generated: {stats['frames']}")
+    except Exception as e:
+        logger.error(f"Preprocessing failed: {str(e)}")
+        raise
 
 if __name__ == "__main__":
     main()
